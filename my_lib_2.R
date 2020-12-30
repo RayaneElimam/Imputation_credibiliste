@@ -7,9 +7,10 @@ library(imputeTS)
 library(evclass)
 library(rpart)
 library(gridExtra)
+library(ggpubr)
+library(kknn)
 #Bruitage
 
-q <- quantile(france[,3],probs = c(0.33,0.66,0.99))
 
 
 
@@ -149,35 +150,6 @@ imputation_pond <- function(data,x,ref,k) {
 }
 
 
-  
-tree_imputation <- function(data,ref,remove,x){
-  set.seed(123)
-  fitControl <- trainControl(method="repeatedcv",number = 3,repeats = 100)
-  app <- data[complete.cases(data),-remove]
-  x2 <- grep(colnames(data)[x],colnames(app))
-  miss <- data[which(is.na(data[,x])),-remove]
-  formula <- paste(colnames(app)[x2],"~")
-  attr <- paste(colnames(app)[-x2],collapse = " + ")
-  formula <- paste(formula,attr)
-  formula <- eval(parse(text = formula))
-  model <- train(formula, app,method="rpart",trControl=fitControl)
-  rmse <- min(model$results$RMSE)
-  tree_un <- 1 - (rmse/(max(app[,x2]) - min(app[,x2]) ))
-  prd <- predict(model,newdata = miss)
-  prd <- as.data.frame(prd)
-  data$uncertainty <- 1
-  for (i in 1:length(rownames(prd))) {
-    data[which(rownames(data) == rownames(prd)[i]),x] <- prd[which(rownames(prd) == rownames(prd)[i]),1]
-    
-    data[which(rownames(data) %in% rownames(prd)[i]),"uncertainty"] <- tree_un
-  }
-  
-  err <- (prd[,1] - ref[which(rownames(ref) %in% rownames(prd)),x] )^2
-  
-  return(list(data = data, error = err,f = formula))
-  
-}
-
 tree_imputation <- function(data,ref,remove,x){
   set.seed(123)
   base <- france[complete.cases(france),-1]
@@ -300,6 +272,37 @@ evaluation_knn <- function(data,start,end,neighbor){
     nas <- sum(is.na(knn_fit))
     if(nas > 0){
       print("ISSUE KNN")
+      data <- NULL
+    }
+  }
+  return(knn_acc)
+}
+
+evaluation_kknn <- function(data,start,end,neighbor){
+  set.seed(123)
+  knn_acc <- c()
+  k <- c(start:end)
+  data$class <- as.factor(data$class)
+  print(sum(is.na(data)))
+  for (i in k) {
+    t_set <- data[1:i,]
+    t_set <- t_set[,-which(names(data) %in% c("uncertainty") )]
+    
+    ts_set <- data[(i+1):nrow(data),]
+    ts_set <- ts_set[which(ts_set$uncertainty == 1),]
+    cl_tsset <- ts_set$class
+    ts_set <- ts_set[,-which(names(data) %in% c("uncertainty") )]
+    
+    print(dim(t_set))
+    
+    model <- kknn(class~.,t_set, ts_set,k = neighbor)
+    knn_fit <- model$fitted.values
+    acc <- sum(knn_fit == cl_tsset)/nrow(ts_set)
+    
+    knn_acc <- c(knn_acc,acc)
+    nas <- sum(is.na(knn_fit))
+    if(nas > 0){
+      print("ISSUE KKNN")
       data <- NULL
     }
   }
@@ -491,7 +494,7 @@ pipeline_data <- function(data,ref,x,nl,dep,arr) {
 
 
 
-pipeline_classifier <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,optimize){
+pipeline_classifierold <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,optimize){
   
   set.seed(123)
   df <- data.frame(matrix(ncol = 3, nrow = 6))
@@ -540,7 +543,7 @@ pipeline_classifier <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,o
   
 }
 
-pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,optimize){
+pipeline_classifier2old <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,optimize){
   
   set.seed(123)
   df <- data.frame(matrix(ncol = 3, nrow = 6))
@@ -590,11 +593,14 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
   
 }
 
+
+
+
 pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,optimize){
   
   set.seed(123)
-  df <- data.frame(matrix(ncol = 4, nrow = 6))
-  colnames(df) <- c("knn","eknn dis+lab","eknn lab","eknn dis")
+  df <- data.frame(matrix(ncol = 5, nrow = 6))
+  colnames(df) <- c("knn","kknn","eknn dis+lab","eknn lab","eknn dis")
   rownames(df) <- c("tree_imp","evid_imp","evid_imp_pond","mean_imp",
                     'locf_imp',"inp_imp")
   
@@ -610,8 +616,13 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
     data[,-c(remove,(remove+2),ncol(data))] <- scale(data[,-c(remove,(remove+2),ncol(data))],center = T,scale = T)
     print(i)
     print(sum(is.na(data)))
+    
     knn_test <- evaluation_knn(data[,-remove],start,end,neighbor)
     df[which(rownames(df) == rownames(df)[i]),"knn"] <- mean(knn_test)
+    
+    kknn_test <- evaluation_kknn(data[,-remove],start,end,neighbor)
+    df[which(rownames(df) == rownames(df)[i]),"kknn"] <- mean(kknn_test)
+    
     
     eknnc_test <- evaluation_eknn_certain(data[,-remove],start,end,neighbor,optimize)
     df[which(rownames(df) == rownames(df)[i]),"eknn dis+lab"] <- mean(eknnc_test)
@@ -625,79 +636,19 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
     
     df_res <- data.frame(       date = c(start:end),
                                 nn_res  = knn_test,
+                                kknn_res = kknn_test,
                                 eknnc_res = eknnc_test,
                                 eknnu_res = eknnu_test,
                                 eknnd_res = eknnd_test)
     
     
     mean_knn <- round(mean(df_res$nn_res),digits = 2)
+    mean_kknn <- round(mean(df_res$kknn_res),digits = 2)
     mean_eknnc <- round(mean(df_res$eknnc_res),digits = 2)  
     mean_eknnu <- round(mean(df_res$eknnu_res),digits = 2)
     mean_eknnd <- round(mean(df_res$eknnd_res),digits = 2)  
-    mean_knn <- paste("KNN",mean_knn)
-    mean_eknnc <- paste("EKNN DIS+LAB",mean_eknnc)
-    mean_eknnu <- paste("EKNN LAB",mean_eknnu)
-    mean_eknnd <- paste("EKNN DIS",mean_eknnd)
-    
-
-    
-    
-  }
-  return(df)
-  
-  
-  
-}
-
-
-
-
-
-ggplot(df_res, aes(date)) + 
-  geom_line(aes(y = nn_res, colour = mean_knn )) + 
-  geom_line(aes(y = eknnc_res, colour = mean_eknnc )) +
-  geom_line(aes(y = eknnu_res, colour = mean_eknnu )) +
-  geom_line(aes(y = eknnd_res, colour = mean_eknnd )) +
-          
-          
-
-pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,optimize){
-  
-  for (i in 1:6) {
-    
-    data <- simple_extract(imputed,i)
-    data <- pipeline_data(data,ref,x,nl,dep,arr)
-    start <- floor(sv * nrow(data))
-    end <- floor(ev * nrow(data))
-    error <- error_extract(imputed,i)
-    data[,-c(remove,(remove+2),ncol(data))] <- scale(data[,-c(remove,(remove+2),ncol(data))],center = T,scale = T)
-    print(i)
-    print(sum(is.na(data)))
-    knn_test <- evaluation_knn(data[,-remove],start,end,neighbor)
-    df[which(rownames(df) == rownames(df)[i]),"knn"] <- mean(knn_test)
-    
-    eknnc_test <- evaluation_eknn_certain(data[,-remove],start,end,neighbor,optimize)
-    df[which(rownames(df) == rownames(df)[i]),"eknn dis+lab"] <- mean(eknnc_test)
-    
-    eknnu_test <- evaluation_eknn_uncertain(data[,-remove],start,end,neighbor,optimize)
-    df[which(rownames(df) == rownames(df)[i]),"eknn lab"] <- mean(eknnu_test)
-    
-    eknnd_test <- evaluation_eknn_dis(data[,-remove],start,end,neighbor,optimize)
-    df[which(rownames(df) == rownames(df)[i]),"eknn dis"] <- mean(eknnd_test)
-    
-    
-    df_res <- data.frame(       date = c(start:end),
-                                nn_res  = knn_test,
-                                eknnc_res = eknnc_test,
-                                eknnu_res = eknnu_test,
-                                eknnd_res = eknnd_test)
-    
-    
-    mean_knn <- round(mean(df_res$nn_res),digits = 2)
-    mean_eknnc <- round(mean(df_res$eknnc_res),digits = 2)  
-    mean_eknnu <- round(mean(df_res$eknnu_res),digits = 2)
-    mean_eknnd <- round(mean(df_res$eknnd_res),digits = 2)  
-    mean_knn <- paste("KNN",mean_knn)
+    mk <- paste("KNN",mean_knn)
+    mean_kknn <- paste("Weighted KNN",mean_kknn)
     mean_eknnc <- paste("EKNN DIS+LAB",mean_eknnc)
     mean_eknnu <- paste("EKNN LAB",mean_eknnu)
     mean_eknnd <- paste("EKNN DIS",mean_eknnd)
@@ -705,123 +656,123 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
     
     
     plot_i[[i]] <- ggplot(df_res, aes(date)) + 
-                     geom_line(aes(y = nn_res, colour = mean_knn )) + 
-                     geom_line(aes(y = eknnc_res, colour = mean_eknnc )) +
-                     geom_line(aes(y = eknnu_res, colour = mean_eknnu )) +
-                     geom_line(aes(y = eknnd_res, colour = mean_eknnd )) +
-                     theme(legend.position="right") +
-                     ggtitle(paste(rownames(df)[i],paste("NA Rate",paste(imputed$na.rate,paste("RMSE",round(error,digits = 2))))) +
-                     xlab("date") + ylab("Accuracy") +
-                     guides(color = guide_legend(override.aes = list(size = 2)))
+      geom_line(aes(y = nn_res, colour = mk )) +
+      geom_line(aes(y = kknn_res, colour = mean_kknn )) + 
+      geom_line(aes(y = eknnc_res, colour = mean_eknnc )) +
+      geom_line(aes(y = eknnu_res, colour = mean_eknnu )) +
+      geom_line(aes(y = eknnd_res, colour = mean_eknnd )) +
+      ggtitle(paste(rownames(df)[i],paste("NA Rate",paste(round(imputed$na.rate,digits = 2),paste("RMSE",round(error,digits = 2)))))) +
+      theme(panel.background = element_rect(fill = 'gray20'),,
+            plot.background=element_rect(fill = "gray20"),legend.position="bottom",plot.title = element_text(size = 9, face = "bold"),
+            axis.text = element_text(size = 8,face = "bold",colour = "white")
+            ,axis.title=element_text(size=8,face="bold",colour = "white"),
+            text = element_text(size=4,face = "bold",colour = "white"),legend.direction = "horizontal",
+            legend.background = element_rect(fill = "gray20", color = NA),
+            legend.key = element_rect(color = "gray20", fill = "gray20"),
+            legend.title = element_text(color = "white"),
+            legend.text = element_text(color = "white",size = 2),
+            panel.grid.major = element_blank(), 
+            panel.grid.minor = element_blank(),
+            panel.border = element_rect(color = "white", fill = NA )) + 
+      xlab("date") + ylab("Accuracy") 
+
               
+
+    ggplot(df_res, aes(date)) + 
+      geom_line(aes(y = nn_res, colour = mk )) +
+      geom_line(aes(y = kknn_res, colour = mean_kknn )) + 
+      geom_line(aes(y = eknnc_res, colour = mean_eknnc )) +
+      geom_line(aes(y = eknnu_res, colour = mean_eknnu )) +
+      geom_line(aes(y = eknnd_res, colour = mean_eknnd )) +
+      ggtitle(paste(rownames(df)[i],paste("NA Rate",paste(round(imputed$na.rate,digits = 2),paste("RMSE",round(error,digits = 2)))))) +
+      theme(panel.background = element_rect(fill = 'gray20'),
+            plot.background=element_rect(fill = "gray20"),legend.position="bottom",plot.title = element_text(size = 9, face = "bold"),
+            axis.text = element_text(size = 16,face = "bold",colour = "white")
+            ,axis.title=element_text(size=16,face="bold",colour = "white"),
+            text = element_text(size=16,face = "bold",colour = "white"),legend.direction = "horizontal",
+            legend.background = element_rect(fill = "gray20", color = NA),
+            legend.key = element_rect(color = "gray20", fill = "gray20"),
+            legend.title = element_text(color = "white"),
+            legend.text = element_text(color = "white",size = 12),
+            panel.grid.major = element_blank(), 
+            panel.grid.minor = element_blank(),
+            panel.border = element_rect(color = "white", fill = NA )) + 
+      xlab("date") + ylab("Accuracy") 
+    
+    
     ggsave(paste(rownames(df)[i],paste(imputed$na.rate,".png",sep = ""),sep = "_"),height = 7,width = 10)
-  }
+    
+    
+  } 
+  ggarrange(plot_i[[1]], plot_i[[2]],plot_i[[3]], 
+            plot_i[[4]],plot_i[[5]],plot_i[[6]],
+            ncol = 3, nrow = 2)
+  ggsave(paste("full",paste(imputed$na.rate,".png",sep = ""),sep = "_"),height = 7,width = 10)
+  
   return(plot_i)
   
 }
 
-d <- 10
-d <- paste("chiffre",d)
-d
-#0.1 0.25 / 0.5 0.7 / 0.65 0.9
-#test 
-
-
-min <- c(0.1,0.5,0.65)
-max <- c(0.25,0.7,0.9)
-levels(oid$location)
-france <- oid[which(oid$location == "United Kingdom"),]
-france <- france[,c(4,6,9)]
-france <- france[complete.cases(france),]
-st <- c(mean(france$new_deaths),sd(france$new_deaths))
-q <- quantile(france[,x],probs = c(0.33,0.66,0.99))
-st
-data <- france
-data$class <- ifelse(data[,x] <= q[1],"0",ifelse(data[,x] <= q[2] ,"1","2"))
-sum(france$new_deaths > q[2])
-table(data$class)
-
-for (i in 1:length(min)) {
-  
-  Test <- imputation_evaluation(france,min[i],max[3],1,3,0.9)
-  
-  tryc <- pipeline_classifier2(Test,france,3,0.6,0.9,2,2,4,3,1,T)
-  
-  }
-             
 
 
 
-france <- oid[which(oid$location == "France"),]
-Algerie <- oid[which(oid$location == "Algeria"),]
-USA <- oid[which(oid$location == "United States"),]
-
-
-france <- france[,c(4,6,9)]
-france <- france[complete.cases(france),]
-
-Algerie <- Algerie[,c(4,6,9)]
-Algerie <- Algerie[complete.cases(Algerie),]
-
-
-USA <- USA[,c(4,6,9)]
-USA <- USA[complete.cases(USA),]
-
-
-
-cnt <-  cbind(france,USA,Algerie)
-View(cnt)
-
-
-colnames(cnt) <- c("date",'FR',"USA","ALG")
-cnt <- cnt[,c(1,3,6,9)]
-
-
-
-full_evaluation <- function(clean_data,min_bruitage,max_bruitage,
-                    nlags,start_eval,end_eval,neighbors,dep,arr,
-                    remove,target,optimize) {
-  
+full_evaluation <- function(clean_data,min_bruitage,max_bruitage,nlags,start_eval,end_eval,neighbors,dep,arr,remove,target,optimize) {
+  path <- getwd()
   for (i in 1:length(min_bruitage)) {
     
     Test <- imputation_evaluation(clean_data,min_bruitage[i],max_bruitage[i],
                                   remove,target,end_eval)
+    na.rate <- round(Test$na.rate,digits = 2)
+    wd <- paste("NA",na.rate)
+    dir.create(wd)
+    setwd(wd)
     
     eval <- pipeline_classifier2(Test,clean_data,target,start_eval,end_eval,nlags
                                  ,dep,arr,target,remove,optimize)
-    
-    return(eval)
+    setwd(path)
   }
   
 }
 
 
-vqr <- full_evakuation(france,min,max,2,0.6,0.9,3,2,3,1,3,T)
-vqr[[1]]
-
-  library(kknn)
-
-
-Test <- imputation_evaluation(france,min[i],max[3],1,3,0.9)
-
-data <- Test$tree_imputed
-
-data <- pipeline_data(data,france,3,1,2,2)
-
-train <- data[1:200,]
-test <- data[201:300,]
-
-fit.kknn <- kknn(class ~ .,train,test,)
-data$class
-dim(data)
-
-data$class <- as.factor(data$class)
-str(data)
-iris.kknn <- kknn(class~., train[,-1], test[,-1], distance = 1,
-                  kernel = "triangular")
-
-
-plot_grid(vqr[[1]], vqr[[2]], labels=c("A", "B"), ncol = 1, nrow = 2)
-
-library(cowplot)
+multiple_eval <- function(clean_data,min_bruitage,max_bruitage,nlags,start_eval,end_eval,neighbors,dep,arr,remove,target,optimize) {
   
+  path <- getwd()
+  for (neighbor in neighbors ) {
+    wd <- paste("K",neighbor)
+    dir.create(wd)
+    setwd(wd)
+    eval <- full_evaluation(clean_data,min_bruitage,max_bruitage,nlags,start_eval,end_eval,neighbor,dep,arr,remove,target,optimize)
+    setwd(path)
+  }
+  
+}
+
+
+
+final_eval <- function(clean_data,min_bruitage,max_bruitage,nlags,start_eval,end_eval,neighbors,dep,arr,remove,target,optimize){
+   path <- getwd()
+   wd <- paste("all_eval")
+   dir.create(wd)
+   setwd(wd)
+   transit <- getwd()
+   for (nlag in nlags) {
+     wd <- paste("nlags",nlag)
+     dir.create(wd)
+     setwd(wd)
+     multiple_eval(clean_data,min_bruitage,max_bruitage,nlag,start_eval,end_eval,neighbors,dep,arr,remove,target,optimize)
+     setwd(transit)
+   }
+  setwd(path)
+}
+
+
+week_transform <- function(clean_data){
+  
+  clean_data$week <- strftime(clean_data$date, format = "%V")
+  reduced <- aggregate(. ~ week, france[,-1], sum)
+  
+}
+
+
+
