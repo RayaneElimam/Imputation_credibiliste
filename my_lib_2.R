@@ -39,7 +39,6 @@ Bruitage_fenetre <- function(data,x,id,max_prc,end_eval) {
   while (i <= length(id)) {
     b <- id[i]-x2[i]
     if(b > 0 && b < end_eval) {
-      print("ok")
       data[b:id[i],x] <- NA
       }
     i <- i+1
@@ -65,6 +64,7 @@ history_cr <- function(data,x,nlags) {
     }
   return(list(data = data,cn = col_num))
   }
+
 
 
 
@@ -144,27 +144,27 @@ imputation_pond <- function(data,x,ref,k) {
       dist <- futur[1,"idx"] - precedent[1,"idx"]
       err <- rbind(err,cbind(gap,dist))
       }
-    print(length(err$gap))
     }
   return(list(data_full = data[complete.cases(data),-which(names(data) %in% "idx")],error = err$gap))
 }
 
 
 tree_imputation <- function(data,ref,remove,x){
+  
   set.seed(123)
-  base <- france[complete.cases(france),-1]
+  
+  base <- data[complete.cases(data),-1]
   smp_size <- floor(0.8 * nrow(base))
   index <- sample(seq_len(nrow(base)),size=smp_size)
   app <- app[index,]
   test <- base[-index,]
   
-  x2 <- grep(colnames(france)[3],colnames(app))
+  x2 <- grep(colnames(data)[x],colnames(app))
   miss <- data[which(is.na(data[,x])),-remove]
   formula <- paste(colnames(app)[x2],"~")
   attr <- paste(colnames(app)[-x2],collapse = " + ")
   formula <- paste(formula,attr)
   formula <- eval(parse(text = formula))
-  formula
   model <- rpart(formula, app)
   tstprd <- predict(model,test)
   rmse <- sqrt(mean( (tstprd- test[,x2])^2))
@@ -249,10 +249,10 @@ node_stat <- function(model,app ,x){
 #Evaluation
 
 evaluation_knn <- function(data,start,end,neighbor){
+  print("KNN")
   set.seed(123)
   knn_acc <- c()
   k <- c(start:end)
-  print(sum(is.na(data)))
   for (i in k) {
     t_set <- data[1:i,]
     cl_tset <- t_set$class
@@ -263,8 +263,7 @@ evaluation_knn <- function(data,start,end,neighbor){
     cl_tsset <- ts_set$class
     ts_set <- ts_set[,-which(names(data) %in% c("class","uncertainty"))]
     
-    print(dim(t_set))
-    
+
     knn_fit <- knn(t_set, ts_set, cl_tset, k = neighbor)
     acc <- sum(knn_fit == cl_tsset)/nrow(ts_set)
     
@@ -279,11 +278,11 @@ evaluation_knn <- function(data,start,end,neighbor){
 }
 
 evaluation_kknn <- function(data,start,end,neighbor){
+  print("WEIGHTED KNN")
   set.seed(123)
   knn_acc <- c()
   k <- c(start:end)
   data$class <- as.factor(data$class)
-  print(sum(is.na(data)))
   for (i in k) {
     t_set <- data[1:i,]
     t_set <- t_set[,-which(names(data) %in% c("uncertainty") )]
@@ -293,8 +292,7 @@ evaluation_kknn <- function(data,start,end,neighbor){
     cl_tsset <- ts_set$class
     ts_set <- ts_set[,-which(names(data) %in% c("uncertainty") )]
     
-    print(dim(t_set))
-    
+
     model <- kknn(class~.,t_set, ts_set,k = neighbor)
     knn_fit <- model$fitted.values
     acc <- sum(knn_fit == cl_tsset)/nrow(ts_set)
@@ -311,6 +309,7 @@ evaluation_kknn <- function(data,start,end,neighbor){
 
 
 evaluation_eknn_certain <- function(data,start,end,neighbor,optimize){
+  print("EKNN DIS+LAB")
   set.seed(123)
   eknn_certain <- c()
   k <- c(start:end)
@@ -322,13 +321,13 @@ evaluation_eknn_certain <- function(data,start,end,neighbor,optimize){
     t_set[which(t_set$uncertainty == 1.01),"uncertainty"] <- 1
     param <- EkNNfit_uncertain_label(t_set[,-which(names(t_set) %in% c("class","uncertainty"))],
                                          t_set[,"class"],
-                                        rep(1:nrow(t_set)),
+                                         t_set[,"uncertainty"],
                                        neighbor,optimize = optimize)$param
     
     
     f_eknn <- EkNNval_uncertain_label(t_set[,-which(names(t_set) %in% c("class","uncertainty"))],
                                           t_set[,"class"],
-                                          rep(1,nrow(t_set)),
+                                          t_set[,"uncertainty"],
                                           ts_set[,-which(names(ts_set) %in% c("class","uncertainty"))],
                                           neighbor,
                                           ts_set[,"class"],param = param)
@@ -336,7 +335,7 @@ evaluation_eknn_certain <- function(data,start,end,neighbor,optimize){
     eknn_certain <- c(eknn_certain,f_eknn_perf)
     nas <- sum(is.na(f_eknn$ypred))
     if(nas > 0){
-      print("ISSUE UNCERTAIN")
+      print("ISSUE EKNN DIS+LAB")
       data <- NULL
     }
     
@@ -347,6 +346,7 @@ evaluation_eknn_certain <- function(data,start,end,neighbor,optimize){
 
 
 evaluation_eknn_dis <- function(data,start,end,neighbor,optimize){
+  print("EKNN DIS")
   set.seed(123)
   eknn_certain <- c()
   k <- c(start:end)
@@ -370,7 +370,7 @@ evaluation_eknn_dis <- function(data,start,end,neighbor,optimize){
     eknn_certain <- c(eknn_certain,f_eknn_perf)
     nas <- sum(is.na(f_eknn$ypred))
     if(nas > 0){
-      print("ISSUE UNCERTAIN")
+      print("ISSUE EKNN DIS")
       data <- NULL
     }
     
@@ -382,6 +382,7 @@ evaluation_eknn_dis <- function(data,start,end,neighbor,optimize){
 
 
 evaluation_eknn_uncertain <- function(data,start,end,neighbor,optimize){
+  print("EKNN LAB")
   set.seed(123)
   eknn_uncertain <- c()
   k <- c(start:end)
@@ -402,12 +403,12 @@ evaluation_eknn_uncertain <- function(data,start,end,neighbor,optimize){
                                           t_set[,"uncertainty"],
                                           ts_set[,-which(names(ts_set) %in% c("class","uncertainty"))],
                                           neighbor,
-                                          ts_set[,"class"],param = param)
+                                          ts_set[,"class"])
     f_eknn_un_perf <- 1 - f_eknn_un$err
     eknn_uncertain <- c(eknn_uncertain,f_eknn_un_perf)
     nas <- sum(is.na(f_eknn_un$ypred))
     if(nas > 0){
-      print("ISSUE UNCERTAIN")
+      print("ISSUE LAB")
       data <- NULL
     }
     
@@ -484,11 +485,13 @@ error_extract <- function(imputed,i){
 
 
 pipeline_data <- function(data,ref,x,nl,dep,arr) {
-  
-  data <- history(data,dep,arr,nl)
-  data <- Discretisation(data,ref,x)
-  
-  return(data[,-x])
+  if(nl > 0){
+    data <- history(data,dep,arr,nl)
+    data <- Discretisation(data,ref,x)
+  }else{
+    data <- Discretisation(data,ref,x)
+  }
+  return(data[complete.cases(data),-x])
 }
 
 
@@ -608,14 +611,12 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
   
   for (i in 1:6) {
     
-    data <- simple_extract(imputed,i)
+    data <- simpl+e_extract(imputed,i)
     data <- pipeline_data(data,ref,x,nl,dep,arr)
     start <- floor(sv * nrow(data))
     end <- floor(ev * nrow(data))
     error <- error_extract(imputed,i)
     data[,-c(remove,(remove+2),ncol(data))] <- scale(data[,-c(remove,(remove+2),ncol(data))],center = T,scale = T)
-    print(i)
-    print(sum(is.na(data)))
     
     knn_test <- evaluation_knn(data[,-remove],start,end,neighbor)
     df[which(rownames(df) == rownames(df)[i]),"knn"] <- mean(knn_test)
@@ -653,7 +654,9 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
     mean_eknnu <- paste("EKNN LAB",mean_eknnu)
     mean_eknnd <- paste("EKNN DIS",mean_eknnd)
     
-    
+    k <- paste("K",neighbor)
+    nlg <- paste("NLAGS",nl)
+    paramk <- paste(k,nlg)
     
     plot_i[[i]] <- ggplot(df_res, aes(date)) + 
       geom_line(aes(y = nn_res, colour = mk )) +
@@ -661,7 +664,8 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
       geom_line(aes(y = eknnc_res, colour = mean_eknnc )) +
       geom_line(aes(y = eknnu_res, colour = mean_eknnu )) +
       geom_line(aes(y = eknnd_res, colour = mean_eknnd )) +
-      ggtitle(paste(rownames(df)[i],paste("NA Rate",paste(round(imputed$na.rate,digits = 2),paste("RMSE",round(error,digits = 2)))))) +
+      ggtitle(paste(rownames(df)[i],paste("NA Rate",paste(round(imputed$na.rate,digits = 2),paste("RMSE",
+                                                                                                  paste(round(error,digits = 2),paramk)))))) +
       theme(panel.background = element_rect(fill = 'gray20'),,
             plot.background=element_rect(fill = "gray20"),legend.position="bottom",plot.title = element_text(size = 9, face = "bold"),
             axis.text = element_text(size = 8,face = "bold",colour = "white")
@@ -670,7 +674,8 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
             legend.background = element_rect(fill = "gray20", color = NA),
             legend.key = element_rect(color = "gray20", fill = "gray20"),
             legend.title = element_text(color = "white"),
-            legend.text = element_text(color = "white",size = 2),
+            legend.text = element_text(color = "white",size = 4),
+            legend.key.size = unit(0.3,"line"),
             panel.grid.major = element_blank(), 
             panel.grid.minor = element_blank(),
             panel.border = element_rect(color = "white", fill = NA )) + 
@@ -684,9 +689,10 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
       geom_line(aes(y = eknnc_res, colour = mean_eknnc )) +
       geom_line(aes(y = eknnu_res, colour = mean_eknnu )) +
       geom_line(aes(y = eknnd_res, colour = mean_eknnd )) +
-      ggtitle(paste(rownames(df)[i],paste("NA Rate",paste(round(imputed$na.rate,digits = 2),paste("RMSE",round(error,digits = 2)))))) +
+      ggtitle(paste(rownames(df)[i],paste("NA Rate",paste(round(imputed$na.rate,digits = 2),paste("RMSE",
+                                                                                                  paste(round(error,digits = 2),paramk)))))) +
       theme(panel.background = element_rect(fill = 'gray20'),
-            plot.background=element_rect(fill = "gray20"),legend.position="bottom",plot.title = element_text(size = 9, face = "bold"),
+            plot.background=element_rect(fill = "gray20"),legend.position="bottom",plot.title = element_text(size = 13, face = "bold"),
             axis.text = element_text(size = 16,face = "bold",colour = "white")
             ,axis.title=element_text(size=16,face="bold",colour = "white"),
             text = element_text(size=16,face = "bold",colour = "white"),legend.direction = "horizontal",
@@ -694,6 +700,7 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
             legend.key = element_rect(color = "gray20", fill = "gray20"),
             legend.title = element_text(color = "white"),
             legend.text = element_text(color = "white",size = 12),
+            legend.key.size = unit(0.3,"line"),
             panel.grid.major = element_blank(), 
             panel.grid.minor = element_blank(),
             panel.border = element_rect(color = "white", fill = NA )) + 
@@ -704,9 +711,7 @@ pipeline_classifier2 <- function(imputed,ref,x,sv,ev,nl,dep,arr,neighbor,remove,
     
     
   } 
-  ggarrange(plot_i[[1]], plot_i[[2]],plot_i[[3]], 
-            plot_i[[4]],plot_i[[5]],plot_i[[6]],
-            ncol = 3, nrow = 2)
+  ggarrange(plotlist = plot_i,ncol = 2, nrow =3)
   ggsave(paste("full",paste(imputed$na.rate,".png",sep = ""),sep = "_"),height = 7,width = 10)
   
   return(plot_i)
@@ -770,9 +775,12 @@ final_eval <- function(clean_data,min_bruitage,max_bruitage,nlags,start_eval,end
 week_transform <- function(clean_data){
   
   clean_data$week <- strftime(clean_data$date, format = "%V")
-  reduced <- aggregate(. ~ week, france[,-1], sum)
+  reduced <- aggregate(. ~ week, data[,-1], sum)
   
 }
+
+
+
 
 
 
