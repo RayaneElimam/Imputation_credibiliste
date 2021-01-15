@@ -3,7 +3,8 @@ library(FNN)
 
 EkNNfit_uncertain_label <-function(x,y,y_certainty,K,param=NULL,alpha=0.95,lambda=1/max(as.numeric(y)),optimize=TRUE,
                   options=list(maxiter=300,eta=0.1,gain_min=1e-6,disp=TRUE)){
-  #Labels to integer
+ 
+   #Labels to integer
   y<-as.integer(as.factor(y))
   
   #train samples to matrix
@@ -36,14 +37,15 @@ EkNNfit_uncertain_label <-function(x,y,y_certainty,K,param=NULL,alpha=0.95,lambd
 
 EkNNval_uncertain_label <- function(xtrain,ytrain,y_certainty,xtst,K,ytst=NULL,param=NULL){
   
+  all <- unique(union(ytrain,ytst))
   #Train/test samples to matrix - Labels to integer
   xtst<-as.matrix(xtst)
   
   xtrain<-as.matrix(xtrain)
   
-  ytrain<-y<-as.integer(as.factor(ytrain))
+  ytrain<-y<-as.integer(factor(ytrain,levels = all))
   
-  if(!is.null(ytst)) ytst<-y<-as.integer(as.factor(ytst))
+  if(!is.null(ytst)) ytst<-y<-as.integer(factor(ytst,levels = all))
   
   #If NULL initialize parameters Alpha gamma
   if(is.null(param)) param<-EkNNinit(xtrain,ytrain)
@@ -106,8 +108,7 @@ EkNNval_uncertain_label <- function(xtrain,ytrain,y_certainty,xtst,K,ytst=NULL,p
   #Predict maximum mass for each sample
   ypred<-max.col(m[,1:M])
   
-  print(max.col(m[,1:M]))
-  
+
   if(!is.null(ytst)) err<-length(which(ypred != ytst))/N else err<-NULL
   
   return(list(m=m,ypred=ypred,err=err))
@@ -115,16 +116,21 @@ EkNNval_uncertain_label <- function(xtrain,ytrain,y_certainty,xtst,K,ytst=NULL,p
 }
 
 
+
+  
+
+
 EkNNval_uncertain_label2 <- function(xtrain,ytrain,y_certainty,xtst,K,ytst=NULL,param=NULL){
   
+  all <- unique(union(ytrain,ytst))
   #Train/test samples to matrix - Labels to integer
   xtst<-as.matrix(xtst)
   
   xtrain<-as.matrix(xtrain)
   
-  ytrain<-y<-as.integer(as.factor(ytrain))
+  ytrain<-y<-as.integer(factor(ytrain,levels = all))
   
-  if(!is.null(ytst)) ytst<-y<-as.integer(as.factor(ytst))
+  if(!is.null(ytst)) ytst<-y<-as.integer(factor(ytst,levels = all))
   
   #If NULL initialize parameters Alpha gamma
   if(is.null(param)) param<-EkNNinit(xtrain,ytrain)
@@ -187,15 +193,82 @@ EkNNval_uncertain_label2 <- function(xtrain,ytrain,y_certainty,xtst,K,ytst=NULL,
   #Predict maximum mass for each sample
   ypred<-max.col(m[,1:M])
   
-  print(max.col(m[,1:M]))
-  
+
   if(!is.null(ytst)) err<-length(which(ypred != ytst))/N else err<-NULL
   
   return(list(m=m,ypred=ypred,err=err))
   
 }
 
+EkNNval_uncertain_label3 <- function(xtrain,ytrain,xtst,K,ytst=NULL,param=NULL){
+  
+  all <- unique(union(ytrain,ytst))
+  #Train/test samples to matrix - Labels to integer
+  xtst<-as.matrix(xtst)
+  
+  xtrain<-as.matrix(xtrain)
+  
+  ytrain<-y<-as.integer(factor(ytrain,levels = all))
+  
+  if(!is.null(ytst)) ytst<-y<-as.integer(factor(ytst,levels = all))
+  
+  #If NULL initialize parameters Alpha gamma
+  if(is.null(param)) param<-EkNNinit(xtrain,ytrain)
+  
+  #Napp Train size
+  Napp<-nrow(xtrain)
+  
+  #Class number
+  M<-max(ytrain)
+  
+  #Test sample size
+  N<-nrow(xtst)
+  
+  #nneighbors for test samples from train samples
+  knn<-get.knnx(xtrain, xtst, k=K)
+  
+  #Distance ^2 to give more weight to nearest neighbors
+  knn$nn.dist<-knn$nn.dist^2
+  
+  #Index matrix
+  is<-t(knn$nn.index)
+  
+  #Distance matrix
+  ds<-t(knn$nn.dist)
+  
 
+  #Mass matrix
+  m = rbind(matrix(0,M,N),rep(1,N))
+  
+  #Mass for each neighbor, combination with dempster rule
+  for(i in 1:N){
+    for(j in 1:K){
+      m1 <- rep(0,M+1)
+      m1[ytrain[is[j,i]]] <- param$alpha * exp(-param$gamma[ytrain[is[j,i]]]^2 * ds[j,i])
+      
+      
+      m1[M+1] <- 1 - m1[ytrain[is[j,i]]]
+      m[1:M,i] <- m1[1:M]*m[1:M,i] + m1[1:M]*m[M+1,i] + m[1:M,i]*m1[M+1]
+      m[M+1,i] <- m1[M+1] * m[M+1,i]
+      m<-m/matrix(colSums(m),M+1,N,byrow=TRUE)
+    }
+  }
+  
+  #Mass matrix
+  m<-t(m)
+  
+  m <- as.data.frame(m)
+  #Retire mass on the entire space
+  m <- m[,-ncol(m)]
+  #Predict maximum mass for each sample
+  ypred<-max.col(m[,1:M])
+  
+  
+  if(!is.null(ytst)) err<-length(which(ypred != ytst))/N else err<-NULL
+  
+  return(list(m=m,ypred=ypred,err=err))
+  
+}
 
 
 classds_uncertain_label <-function(param,knn,y,y_certainty,K){
@@ -399,7 +472,7 @@ optimds_uncertain_label<- function(x,y,y_certainty,param,knn,K,lambda,options){
     Errco<-costgrad$cost
     D <- costgrad$grad
     if(is.nan(gain) | is.infinite(gain)) gain <- 1
-    if(options$disp) print(c(it,Errco,gain))
+    #if(options$disp) print(c(it,Errco,gain))
     if(Errco > Errcop){
       P <- Pp
       D <- Dp
@@ -443,10 +516,6 @@ EkNNinit <- function(x,y,alpha=0.95){
 
 
 
-
-                                                     train_evid_imputation[,"uncertainty"],
-                                                     K = 5,
-                                                     optimize = T)
 
 
 
