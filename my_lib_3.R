@@ -154,7 +154,7 @@ tree_imputation <- function(data,ref,remove,x){
   
   set.seed(123)
   
-  base <- data[complete.cases(data),-1]
+  base <- data[complete.cases(data),-remove]
   smp_size <- floor(0.8 * nrow(base))
   index <- sample(seq_len(nrow(base)),size=smp_size)
   app <- app[index,]
