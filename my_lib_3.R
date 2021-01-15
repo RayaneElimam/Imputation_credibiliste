@@ -148,7 +148,7 @@ imputation_pond <- function(data,x,ref,k) {
     }
   return(list(data_full = data[complete.cases(data),-which(names(data) %in% "idx")],error = err$gap))
 }
-
+app
 
 tree_imputation <- function(data,ref,remove,x){
   
@@ -157,7 +157,7 @@ tree_imputation <- function(data,ref,remove,x){
   base <- data[complete.cases(data),-remove]
   smp_size <- floor(0.8 * nrow(base))
   index <- sample(seq_len(nrow(base)),size=smp_size)
-  app <- app[index,]
+  app <- base[index,]
   test <- base[-index,]
   
   x2 <- grep(colnames(data)[x],colnames(app))
@@ -168,10 +168,9 @@ tree_imputation <- function(data,ref,remove,x){
   formula <- eval(parse(text = formula))
   model <- rpart(formula, app)
   tstprd <- predict(model,test)
-  rmse <- sqrt(mean( (tstprd- test[,x2])^2))
+  rmse <- sqrt(mean( (tstprd - test[,x2])^2))
   max_rmse <- sqrt(max( (tstprd- test[,x2])^2)) 
   tree_un <- 1 - (rmse/max_rmse)
-  print(tree_un)
   model <- rpart(formula, base)
   prd <- predict(model,miss)
   prd <- as.data.frame(prd)
