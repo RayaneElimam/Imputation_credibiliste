@@ -1,5 +1,5 @@
 setwd("Projet-COVID")
-source("full_lib.R")
+source("used function.R")
 
 set.seed(123)
 n_neighbor <- c(1,10,20)
